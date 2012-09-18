@@ -1,0 +1,1023 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:WindowedApplication xmlns:fx="http://ns.adobe.com/mxml/2009"
+					   xmlns:s="library://ns.adobe.com/flex/spark"
+					   xmlns:mx="library://ns.adobe.com/flex/mx"
+					   width="1088"
+					   height="680"
+					   creationComplete="ProtoSearch_creationComplete(event)"
+					   currentState="LoggedOut"
+					   xmlns:components="components.*">
+	<fx:Script>
+<![CDATA[
+			import com.facebook.graph.Facebook;  
+			import com.facebook.graph.FacebookDesktop;
+			import com.facebook.graph.data.Batch;
+			
+			import components.*;
+			import components.BrowserTab;
+			import components.Helper;
+			import components.ResultItem;
+			import components.ResultType;
+			import components.SearchResult;
+			import components.UserData;
+			
+			import mx.controls.Alert;
+			import mx.core.UIComponent;
+			import mx.events.CloseEvent;
+			import mx.events.FlexEvent;
+			
+			[Bindable]
+			private var currentRequestCount:int = 0;
+			
+			[Bindable]
+			private var currentUser:Object;
+			
+			private var globalUser:UserData;
+			
+			[Bindable]
+			private var isBusy:Boolean = false;
+			private var peopleSearchBatch:Batch = new Batch();
+			
+			private var peopleSearchRequests:int = 0;
+			
+			private var prefetchCount:int = 0;
+			private var processedFriendsCount:int = 0;
+			
+			private var searchResultCollection:Array;
+			private var tempMutualFriends:Dictionary = new Dictionary();
+			
+			private var tempPeople:Dictionary = new Dictionary();
+			
+			private var totalFriendsCount:int = 0;
+			
+			private function btnPrefetchClear_clickHandler(event:MouseEvent):void {
+				setBusy("Clearing data...");
+				processedFriendsCount = 0;
+				updatePrefetchStatus();
+				EncryptedLocalStore.removeItem(currentUser.id);
+				getCurrentUser();
+			}
+			
+			private function btnSearch_clickHandler(event:MouseEvent):void {
+				if (txtSearch.text.length == 0) {
+					Alert.show("Please enter a search term and try again.", "Missing search term");
+				} else {
+					if (processedFriendsCount < totalFriendsCount) {
+						Alert.show("Prefecthing of friend data must be complete to perform a search.  Please wait until prefetching is complete.",
+							"Prefetching is not complete", Alert.OK, gMain);
+					} else {
+						performSearch();
+					}
+				}
+			}
+			
+			private function clearBusy():void {
+				isBusy = false;
+				lblBusy.text = "";
+			}
+			
+			private function clearCurrentUser():void {
+				currentUser = null;
+				imgProfile.source = "";
+				while (vsContainer.length > 1) {
+					vsContainer.removeElementAt(1);
+				}
+			}
+			
+			private function clearSearchResults(clearTextBox:Boolean):void {
+				while (resultContainer.numChildren > 0) {
+					resultContainer.removeChildAt(0);
+				}
+				if (clearTextBox) {
+					txtSearch.text = "";
+				}
+			}
+			
+			private function currentUserLink_clickHandler(event:MouseEvent):void {
+				var tthContainer:TerrificTabHelper = new TerrificTabHelper(vsContainer);
+				tthContainer.addTab("Profile", currentUser.link);
+			}
+			
+			private function displaySearchResults():void {
+				
+				//coordinates data structure
+				var coordinates:Object = new Object();
+				coordinates["result"] = new Array();
+				coordinates["mutualFriends"] = new Array();
+				coordinates["connections"] = new Array();
+				
+				//Add result coordinates				
+				coordinates["result"].push(new Point(50, 50)); // result 1
+				coordinates["result"].push(new Point(512, 50)); // result 2
+				coordinates["result"].push(new Point(50, 590)); // result 3
+				coordinates["result"].push(new Point(512, 590)); // result 4 
+				coordinates["result"].push(new Point(974, 50)); // result 5
+				coordinates["result"].push(new Point(974, 590)); // result 6
+				
+				//Add mutual friends coordinates
+				
+				//mutual friends for result1
+				coordinates["mutualFriends"].push(new Point(254, 100));
+				//mutual friends for result2
+				coordinates["mutualFriends"].push(new Point(620, 170));
+				//mutual friends for result3
+				coordinates["mutualFriends"].push(new Point(254, 540));
+				//mutual friends for result4
+				coordinates["mutualFriends"].push(new Point(620, 470));
+				//mutual friends for result5
+				coordinates["mutualFriends"].push(new Point(770, 100));
+				//mutual friends for result6
+				coordinates["mutualFriends"].push(new Point(770, 540));
+				
+				// Add connection coordinates
+				
+				// Add connectionitem coordinates for result 1
+				coordinates["connectionItems"] = new Array;
+				coordinates["connectionItems"].push(new Point(150, 130));
+				coordinates["connectionItems"].push(new Point(80, 180));
+				coordinates["connectionItems"].push(new Point(50, 270));
+				coordinates["connections"].push(coordinates["connectionItems"]);
+				
+				// Add connectionitem coordinates for result 2
+				coordinates["connectionItems"] = new Array;
+				coordinates["connectionItems"].push(new Point(370, 170));
+				coordinates["connectionItems"].push(new Point(440, 170));
+				coordinates["connectionItems"].push(new Point(510, 170));
+				coordinates["connections"].push(coordinates["connectionItems"]);
+				
+				// Add connectionitem coordinates for result 3
+				coordinates["connectionItems"] = new Array;
+				coordinates["connectionItems"].push(new Point(150, 510));
+				coordinates["connectionItems"].push(new Point(80, 450));
+				coordinates["connectionItems"].push(new Point(50, 360));
+				coordinates["connections"].push(coordinates["connectionItems"]);
+				
+				// Add connectionitem coordinates for result 4
+				coordinates["connectionItems"] = new Array;
+				coordinates["connectionItems"].push(new Point(370, 470));
+				coordinates["connectionItems"].push(new Point(440, 470));
+				coordinates["connectionItems"].push(new Point(510, 470));
+				coordinates["connections"].push(coordinates["connectionItems"]);
+				
+				// Add connectionitem coordinates for result 5
+				coordinates["connectionItems"] = new Array;
+				coordinates["connectionItems"].push(new Point(874, 130));
+				coordinates["connectionItems"].push(new Point(944, 180));
+				coordinates["connectionItems"].push(new Point(974, 270));
+				coordinates["connections"].push(coordinates["connectionItems"]);
+				
+				// Add connectionitem coordinates for result 6
+				coordinates["connectionItems"] = new Array;
+				coordinates["connectionItems"].push(new Point(874, 510));
+				coordinates["connectionItems"].push(new Point(944, 460));
+				coordinates["connectionItems"].push(new Point(974, 370));
+				coordinates["connections"].push(coordinates["connectionItems"]);
+				
+				// initialize the center coordinates
+
+				//var halfBgWidth:Number=1024/2;
+				//var halfBgHeight:Number=660/2;
+				var halfBgWidth:Number=displayContianer.width/2;
+				var halfBgHeight:Number=displayContianer.height/2;
+				//Alert.show(displayContianer.height.toString());
+				//var halfSearchWidth:Number=290/2;
+				//var halfSearchHeight:Number=40/2;
+				var halfSearchWidth:Number=SearchBoxOutest.width/2;
+				var halfSearchHeight:Number=SearchBoxOutest.height/2;
+
+				
+
+				//Add the various corners of the search box  
+				coordinates["center"] = new Array;
+				coordinates["center"].push(new Point(halfBgWidth-halfSearchWidth,halfBgHeight-halfSearchHeight));
+				coordinates["center"].push(new Point(halfBgWidth,halfBgHeight-halfSearchHeight));
+				coordinates["center"].push(new Point(halfBgWidth-halfSearchWidth,halfBgHeight+halfSearchHeight));
+				coordinates["center"].push(new Point(halfBgWidth,halfBgHeight+halfSearchHeight));
+				coordinates["center"].push(new Point(halfBgWidth+halfSearchWidth,halfBgHeight-halfSearchHeight));
+				coordinates["center"].push(new Point(halfBgWidth+halfSearchWidth,halfBgHeight+halfSearchHeight));
+				
+				searchResultCollection.sortOn("score", Array.DESCENDING | Array.NUMERIC);
+				
+				var i:int, j:int;
+				var line1:components.Line, line2:components.Line;
+				//get the center coordinates for this result
+				var centerCoordinates:Array = coordinates["center"];
+				var tthContainer:TerrificTabHelper = new TerrificTabHelper(vsContainer);
+				for (i = 0; ((i < 6) && (i < searchResultCollection.length)); i++) {
+					if (searchResultCollection[i]) {
+						var searchResult:SearchResult = searchResultCollection[i];
+						
+//						
+						// Draw result
+						var result:DisplayItem = new DisplayItem(searchResult.result,
+							tthContainer);
+
+						
+						
+						
+						result.x = coordinates.result[i].x/1024*displayContianer.width;
+						result.y = coordinates.result[i].y/660*displayContianer.height;
+
+						//type:ResultType = searchResult.result.type();
+
+						//if you dont have any mutual friends or connections with the result item then you show the direct components.Line 
+						if((searchResult.mutualFriends.length +　searchResult.connections.length) == 0){
+							line1 = new components.Line(result.x, result.y, centerCoordinates[i].x, centerCoordinates[i].y,searchResult.result.type);
+							resultContainer.addChild(new components.Line(result.x, result.y, centerCoordinates[i].x, centerCoordinates[i].y, searchResult.result.type));
+						}	
+						
+							// Draw mutual friends
+							if (searchResult.mutualFriends.length > 0) {
+								searchResult.mutualFriends.sortOn("score", Array.DESCENDING |
+									Array.NUMERIC);
+								
+								var mutualFriendList:MutualList = new MutualList(searchResult.
+									mutualFriends, tthContainer);
+								
+								if(searchResult.connections.length==0){
+									mutualFriendList.x = (result.x+centerCoordinates[i].x)/2;
+									mutualFriendList.y = (result.y+centerCoordinates[i].y)/2;
+								}
+								else{
+								mutualFriendList.x = coordinates.mutualFriends[i].x/1024*displayContianer.width;
+								mutualFriendList.y = coordinates.mutualFriends[i].y/660*displayContianer.height;
+								}
+								//draw the components.Line in two step manner else draw straight components.Line to search box
+								//draw 2 components.Lines if mutual friends present
+								line1 = new components.Line(result.x, result.y, mutualFriendList.x, mutualFriendList.y,searchResult.result.type);
+								line2 = new components.Line(mutualFriendList.x, mutualFriendList.y, centerCoordinates[i].x, centerCoordinates[i].y,searchResult.result.type);
+								//else draw straight components.Line
+								resultContainer.addChild(line1);
+								resultContainer.addChild(line2);
+								
+								resultContainer.addChild(mutualFriendList);
+							}
+							
+							// Draw connections
+							if (searchResult.connections.length > 0) {
+								searchResult.connections.sortOn("score", Array.DESCENDING |
+									Array.NUMERIC);
+								
+								var connection1:ConnectionItem = new ConnectionItem(searchResult.
+									connections[0],tthContainer);
+								connection1.x = coordinates.connections[i][0].x/1024*displayContianer.width;
+								connection1.y = coordinates.connections[i][0].y/660*displayContianer.height;
+								//display the components.Line for connection 1
+								line1 = new components.Line(result.x, result.y, connection1.x, connection1.y,searchResult.result.type);
+								line2 = new components.Line(connection1.x, connection1.y, centerCoordinates[i].x, centerCoordinates[i].y,searchResult.result.type);
+								resultContainer.addChild(line1);
+								resultContainer.addChild(line2);
+								resultContainer.addChild(connection1);
+								
+								if (searchResult.connections.length > 1) {
+									var connection2:ConnectionItem = new ConnectionItem(searchResult.
+										connections[1],tthContainer);
+									connection2.x = coordinates.connections[i][1].x/1024*displayContianer.width;
+									connection2.y = coordinates.connections[i][1].y/660*displayContianer.height;
+									//display the components.Line for connection 2 
+									line1 = new components.Line(result.x, result.y, connection2.x, connection2.y,searchResult.result.type);
+									line2 = new components.Line(connection2.x, connection2.y, centerCoordinates[i].x, centerCoordinates[i].y,searchResult.result.type);
+									resultContainer.addChild(line1);
+									resultContainer.addChild(line2);
+									resultContainer.addChild(connection2);
+								}
+								
+								if (searchResult.connections.length == 3) {
+									var connection3:ConnectionItem = new ConnectionItem(searchResult.
+										connections[2],tthContainer);
+									connection3.x = coordinates.connections[i][2].x/1024*displayContianer.width;
+									connection3.y = coordinates.connections[i][2].y/660*displayContianer.height;
+									//display the components.Line for connection 3
+									line1 = new components.Line(result.x, result.y, connection3.x, connection3.y,searchResult.result.type);
+									line2 = new components.Line(connection3.x, connection3.y, centerCoordinates[i].x, centerCoordinates[i].y,searchResult.result.type);
+									resultContainer.addChild(line1);
+									resultContainer.addChild(line2);
+									resultContainer.addChild(connection3);
+								} else if (searchResult.connections.length > 2) {
+									var list:Array = new Array();
+									for (j = 2; j < searchResult.connections.length; j++) {
+										list.push(searchResult.connections[j]);
+									}
+									var connectionList:ConnectionMoreItem = new ConnectionMoreItem(list,
+										i,tthContainer);
+									connectionList.x = coordinates.connections[i][2].x/1024*displayContianer.width;
+									connectionList.y = coordinates.connections[i][2].y/660*displayContianer.height;
+									//disaplay the components.Line for 'connection more item'
+									line1 = new components.Line(result.x, result.y, connectionList.x, connectionList.y,searchResult.result.type);
+									line2 = new components.Line(connectionList.x, connectionList.y, centerCoordinates[i].x, centerCoordinates[i].y,searchResult.result.type);
+									resultContainer.addChild(line1);
+									resultContainer.addChild(line2);
+									resultContainer.addChild(connectionList);
+								}
+							}
+							resultContainer.addChild(result);
+						}
+					}
+					
+					clearBusy();
+				}
+			
+
+			private function friendInfoHandler(result:Object):void {
+				if (result.success) {
+					var friendData:Array = result.data as Array;
+					var friendCount:int = friendData.length / components.Helper.
+						friendFields;
+					var i:int, pos:int;
+					for (i = 0; i < friendCount; i++) {
+						try {
+							pos = i * components.Helper.friendFields;
+							// User data
+							var userId:String = friendData[pos].body.id;
+							globalUser.friends[userId] = friendData[pos].body;
+							globalUser.friends[userId]["data"] = new Array();
+							// Mutual Friends
+							globalUser.mutualFriends[userId] = friendData[pos + 1].
+								body.data;
+							processFriendInfo(userId, friendData[pos + 2].body.data); // Books
+							processFriendInfo(userId, friendData[pos + 3].body.data); // Events
+							processFriendInfo(userId, friendData[pos + 4].body.data); // Groups
+							processFriendInfo(userId, friendData[pos + 5].body.data); // Interests
+							processFriendInfo(userId, friendData[pos + 6].body.data); // Likes
+							processFriendInfo(userId, friendData[pos + 7].body.data); // Movies
+							processFriendInfo(userId, friendData[pos + 8].body.data); // Music
+							processFriendInfo(userId, friendData[pos + 9].body.data); // Television
+						} catch (errObject:Error) {
+							//trace(friendData[pos].body.id.toString);
+							trace(errObject.message);
+						} finally {
+							processedFriendsCount++;
+						}
+					}
+					storeData(currentUser.id, globalUser);
+				}
+				updatePrefetchStatus();
+			}
+			
+			private function friendsHandler(result:Object, fail:Object):void {
+				var friends:Array = result as Array;
+				totalFriendsCount = friends.length;
+				processedFriendsCount = 0;
+				var retrieveFriends:Array = new Array();
+				for each (var friend:Object in friends) {
+					if (globalUser.friends[friend.id] == null) {
+						retrieveFriends.push(friend.id);
+					} else {
+						processedFriendsCount++;
+					}
+				}
+				updatePrefetchStatus();
+				var batches:Array = components.Helper.getFriendsInfo(retrieveFriends);
+				for each (var batch:Batch in batches) {
+					FacebookDesktop.batchRequest(batch, friendInfoHandler);
+				}
+			}
+			
+			private function getCurrentUser():void {
+				FacebookDesktop.api(components.Helper.getCurrentUser(), getCurrrentUserHandler);
+			}
+			
+			private function getCurrrentUserHandler(result:Object, fail:Object):void {
+				if (result != null) {
+					setCurrentUser(result);
+				} else {
+					FacebookDesktop.api(components.Helper.getCurrentUser(), getCurrrentUserHandler);
+				}
+			}
+			
+			private function getPersonalInfo():void {
+				var batch:Batch = new Batch();
+				components.Helper.getPersonInfo(batch, "me");
+				FacebookDesktop.batchRequest(batch, personalInfoHelper);
+			}
+			
+			private function login():void {
+				setBusy("Logging in...");
+				FacebookDesktop.login(loginHandler, components.Helper.permissions);
+			}
+			
+			private function loginHandler(success:Object, fail:Object):void {
+				clearBusy();
+				if (success) {
+					currentState = "LoggedIn";
+					setCurrentUser(success.user);
+				}
+			}
+			
+			private function logout():void {
+				FacebookDesktop.logout();
+				currentState = "LoggedOut";
+				clearSearchResults(true);
+				clearCurrentUser();
+			}
+			
+			private function peopleSearchHelper(result:Object):void {
+				if (result.success) {
+					var peopleData:Array = result.data as Array;
+					var peopleCount:int = peopleData.length / components.Helper.
+						friendFields;
+					var i:int, j:int, pos:int;
+					for (i = 0; i < peopleCount; i++) {
+						pos = i * components.Helper.friendFields;
+						var personId:String = peopleData[pos].body.id;
+						var person:Object = peopleData[pos].body;
+						
+						var resultPerson:ResultItem = new ResultItem(person.name,
+							ResultType.PERSON, components.Helper.getFacebookURL(personId),
+							FacebookDesktop.getImageUrl(personId, "small"), 0);
+						var searchResult:SearchResult = new SearchResult(resultPerson,
+							0);
+						
+						tempPeople[personId] = peopleData[pos];
+						tempPeople[personId]["data"] = new Array();
+						tempMutualFriends[personId] = peopleData[pos + 1].body.data;
+						
+						for each (var mutualFriend:Object in tempMutualFriends[personId]) {
+							var mutualFriendResult:ResultItem = new ResultItem(mutualFriend.
+								name, ResultType.PERSON, components.Helper.getFacebookURL(mutualFriend.
+									id), FacebookDesktop.getImageUrl(mutualFriend.id,
+										"small"), globalUser.mutualFriends[mutualFriend.
+											id]);
+							searchResult.addMutualFriend(mutualFriendResult);
+						}
+						
+						for (j = 2; j < 10; j++) {
+							var data:Array = peopleData[pos + j].body.data;
+							if (data != null && data.length > 0) {
+								var items:Array = data as Array;
+								for each (var item:Object in items) {
+									var groupName:String = globalUser.myGroups[item.
+										id];
+									if (groupName != null) {
+										var groupPopularity:int = 0;
+										if (globalUser.friendGroups[item.id]) {
+											groupPopularity = globalUser.friendGroups[item.
+												id].length;
+										}
+										var commonGroup:ResultItem = new ResultItem(groupName,
+											ResultType.GROUP, components.Helper.
+											getFacebookURL(item.id), FacebookDesktop.
+											getImageUrl(item.id, "small"), 1 + groupPopularity);
+										searchResult.addConnection(commonGroup);
+									}
+								}
+								tempPeople[personId]["data"].push(item.id);
+							}
+						}
+						searchResultCollection.push(searchResult);
+					}
+					peopleSearchRequests--;
+					
+					if (peopleSearchRequests == 0) {
+						displaySearchResults();
+					}
+				}
+			}
+			
+			private function performSearch():void {
+				setBusy("Searching...");
+				
+				clearSearchResults(false);
+				
+				var searchTerm:String = escape(txtSearch.text);
+				
+				FacebookDesktop.batchRequest(components.Helper.getSearch(searchTerm),
+					searchHandler);
+			}
+			
+			private function personalInfoHelper(result:Object):void {
+				if (result.success) {
+					var myData:Array = result.data as Array;
+					globalUser.data = myData[0].body;
+					
+					processMyInfo(myData[2].body.data); // Books
+					processMyInfo(myData[3].body.data); // Events
+					processMyInfo(myData[4].body.data); // Groups
+					processMyInfo(myData[5].body.data); // Interests
+					processMyInfo(myData[6].body.data); // Likes
+					processMyInfo(myData[7].body.data); // Movies
+					processMyInfo(myData[8].body.data); // Music
+					processMyInfo(myData[9].body.data); // Television
+				}
+			}
+			
+			private function processFriendInfo(userId:String, data:Array):void {
+				if (data != null && data.length > 0) {
+					var items:Array = data as Array;
+					for each (var item:Object in items) {
+						var friendItem:Array = globalUser.friendGroups[item.id];
+						if (friendItem == null) {
+							friendItem = new Array;
+						}
+						friendItem.push(userId);
+						globalUser.friendGroups[item.id] = friendItem;
+						globalUser.friends[userId]["data"].push(item.id);
+					}
+				}
+			}
+			
+			private function processMyInfo(data:Array):void {
+				if (data != null && data.length > 0) {
+					var items:Array = data as Array;
+					for each (var item:Object in items) {
+						globalUser.myGroups[item.id] = item.name;
+					}
+				}
+			}
+			
+			// process the search results to generate the list of relevant lists from our friends info 
+			private function processSearchResults(searchResultData:Array):void {
+				searchResultCollection = new Array();
+				var i:int = 0;
+				var mutualFriend:Object;
+				var mfPopularity:int = 0;
+				var mutualFriendResult:ResultItem;
+				var groupId:String;
+				var groupName:String;
+				var groupPopularity:int = 0;
+				var commonGroup:ResultItem;
+				var result:ResultItem;
+				var searchResult:SearchResult;
+				var friendId:String;
+				
+				// Process the people search results
+				var peopleResults:Array = searchResultData[0].body.data as Array;
+				for (i = 0; i < peopleResults.length; i++) {
+					var peopleResult:Object = peopleResults[i];
+					
+					// Create people result
+					 result = new ResultItem(peopleResult.name, ResultType.
+						PERSON, components.Helper.getFacebookURL(peopleResult.id),
+						FacebookDesktop.getImageUrl(peopleResult.id, "small"), 0);
+					 searchResult = new SearchResult(result, peopleResults.
+						length - i);
+					
+					if (globalUser.friends[peopleResult.id]) {
+						// result is a current friend
+						var friend:Object = globalUser.friends[peopleResult.id];
+						
+						for each (mutualFriend in globalUser.mutualFriends[peopleResult.
+							id]) {
+								mfPopularity = 0;
+								if (globalUser.mutualFriends[mutualFriend.id]) {
+									mfPopularity = globalUser.mutualFriends[mutualFriend.
+										id].length;
+								}
+								 mutualFriendResult = new ResultItem(mutualFriend.
+									name, ResultType.PERSON, components.Helper.getFacebookURL(mutualFriend.
+										id), FacebookDesktop.getImageUrl(mutualFriend.id,
+											"small"), mfPopularity);
+								searchResult.addMutualFriend(mutualFriendResult);
+							}
+						
+						for each ( groupId in friend.data) {
+							 groupName = globalUser.myGroups[groupId];
+							if (groupName != null) {
+								 groupPopularity = 0;
+								if (globalUser.friendGroups[groupId]) {
+									groupPopularity = globalUser.friendGroups[groupId].
+										length;
+								}
+								 commonGroup = new ResultItem(groupName,
+									ResultType.GROUP, components.Helper.getFacebookURL(groupId),
+									FacebookDesktop.getImageUrl(groupId, "small"),
+									1 + groupPopularity);
+								searchResult.addConnection(commonGroup);
+							}
+						}
+						searchResultCollection.push(searchResult);
+						
+					} else if (tempPeople[peopleResult.id]) {
+						// result has been cached
+						var tempPerson:Object = tempPeople[peopleResult.id];
+						
+						for each ( mutualFriend in tempMutualFriends[peopleResult.
+							id]) {
+								 mfPopularity = 0;
+								if (globalUser.mutualFriends[mutualFriend.id]) {
+									mfPopularity = globalUser.mutualFriends[mutualFriend.
+										id].length;
+								}
+								 mutualFriendResult = new ResultItem(mutualFriend.
+									name, ResultType.PERSON, components.Helper.getFacebookURL(mutualFriend.
+										id), FacebookDesktop.getImageUrl(mutualFriend.id,
+											"small"), mfPopularity);
+								searchResult.addMutualFriend(mutualFriendResult);
+							}
+						
+						for each (groupId in tempPerson.data) {
+							 groupName = globalUser.myGroups[groupId];
+							if (groupName != null) {
+								 groupPopularity = 0;
+								if (globalUser.friendGroups[groupId]) {
+									groupPopularity = globalUser.friendGroups[groupId].
+										length;
+								}
+								 commonGroup = new ResultItem(groupName,
+									ResultType.GROUP, components.Helper.getFacebookURL(groupId),
+									FacebookDesktop.getImageUrl(groupId, "small"),
+									1 + groupPopularity);
+								searchResult.addConnection(commonGroup);
+							}
+						}
+						searchResultCollection.push(searchResult);
+					} else {
+						// result is not a friend
+						components.Helper.getPersonInfo(peopleSearchBatch, peopleResult.
+							id);
+						if (peopleSearchBatch.length == (components.Helper.friendsPerRequest *
+							components.Helper.friendFields)) {
+							// batch full, send result and continue
+							peopleSearchRequests++;
+							FacebookDesktop.batchRequest(peopleSearchBatch, peopleSearchHelper);
+							peopleSearchBatch = new Batch();
+						}
+					}
+				}
+				if (peopleSearchBatch.length > 0) {
+					// send final batch
+					peopleSearchRequests++;
+					FacebookDesktop.batchRequest(peopleSearchBatch, peopleSearchHelper);
+					peopleSearchBatch = new Batch();
+				}
+				
+				
+				// Process the events search results
+				var eventsResults:Array = searchResultData[1].body.data as Array;
+				for (i = 0; i < eventsResults.length; i++) {
+					var eventsResult:Object = eventsResults[i];
+					
+					// Create event result
+					 result = new ResultItem(eventsResult.name, ResultType.
+						EVENT, components.Helper.getFacebookURL(eventsResult.id),
+						FacebookDesktop.getImageUrl(eventsResult.id, "small"), 0);
+					 searchResult = new SearchResult(result, eventsResults.
+						length - i);
+					
+					// Add any friends who art part of the event
+					if (globalUser.friendGroups[eventsResult.id] != null) {
+						for each (friendId in globalUser.friendGroups[eventsResult.
+							id]) {
+								mutualFriend = globalUser.friends[friendId]; 
+								 mfPopularity = 0;
+								if (globalUser.mutualFriends[mutualFriend.id]) {
+									mfPopularity = globalUser.mutualFriends[mutualFriend.
+										id].length;
+								}
+								 mutualFriendResult = new ResultItem(mutualFriend.
+									name, ResultType.PERSON, mutualFriend.link, FacebookDesktop.
+									getImageUrl(mutualFriend.id, "small"), mfPopularity);
+								searchResult.addMutualFriend(mutualFriendResult);
+							}
+					}
+					searchResultCollection.push(searchResult);
+				}
+				
+				// Process the groups search results
+				var groupsResults:Array = searchResultData[2].body.data as Array;
+				for (i = 0; i < groupsResults.length; i++) {
+					var groupsResult:Object = groupsResults[i];
+					
+					// Create group result
+					 result = new ResultItem(groupsResult.name, ResultType.
+						GROUP, components.Helper.getFacebookURL(groupsResult.id),
+						FacebookDesktop.getImageUrl(groupsResult.id, "small"), 0);
+					 searchResult = new SearchResult(result, groupsResults.
+						length - i);
+					
+					// Add any friends who are part of the group
+					if (globalUser.friendGroups[groupsResult.id] != null) {
+						for each ( friendId in globalUser.friendGroups[groupsResult.
+							id]) {
+								 mutualFriend = globalUser.friends[friendId];
+								 mfPopularity = 0;
+								if (globalUser.mutualFriends[mutualFriend.id]) {
+									mfPopularity = globalUser.mutualFriends[mutualFriend.
+										id].length;
+								}
+								 mutualFriendResult = new ResultItem(mutualFriend.
+									name, ResultType.PERSON, mutualFriend.link, FacebookDesktop.
+									getImageUrl(mutualFriend.id, "small"), mfPopularity);
+								searchResult.addMutualFriend(mutualFriendResult);
+							}
+					}
+					searchResultCollection.push(searchResult);
+				}
+				
+				// Process the pages search results
+				var pagesResults:Array = searchResultData[3].body.data as Array;
+				for (i = 0; i < pagesResults.length; i++) {
+					var pagesResult:Object = pagesResults[i];
+					
+					// Create page result
+					 result = new ResultItem(pagesResult.name, ResultType.
+						PAGE, components.Helper.getFacebookURL(pagesResult.id), FacebookDesktop.
+						getImageUrl(pagesResult.id, "small"), 0);
+					 searchResult = new SearchResult(result, pagesResults.
+						length - i);
+					
+					// Add any friends who like the page
+					if (globalUser.friendGroups[pagesResult.id] != null) {
+						for each ( friendId in globalUser.friendGroups[pagesResult.
+							id]) {
+								 mutualFriend = globalUser.friends[friendId];
+								 mfPopularity = 0;
+								if (globalUser.mutualFriends[mutualFriend.id]) {
+									mfPopularity = globalUser.mutualFriends[mutualFriend.
+										id].length;
+								}
+								 mutualFriendResult = new ResultItem(mutualFriend.
+									name, ResultType.PERSON, mutualFriend.link, FacebookDesktop.
+									getImageUrl(mutualFriend.id, "small"), mfPopularity);
+								searchResult.addMutualFriend(mutualFriendResult);
+							}
+					}
+					searchResultCollection.push(searchResult);
+				}
+				
+				if (peopleSearchRequests == 0) {
+					displaySearchResults();
+				}
+			} 
+			
+			private function ProtoSearch_creationComplete(event:FlexEvent):void {
+				nativeWindow.x = (Capabilities.screenResolutionX - nativeWindow.width) / 2;
+				nativeWindow.y = (Capabilities.screenResolutionY - nativeWindow.height) / 2;
+				tabBar.setCloseableTab(0, false);
+				setBusy("Loading...");
+				FacebookDesktop.init(components.Helper.applicationId, loginHandler);
+			}
+			 
+			private function retrieveData(userId:String):UserData {
+				var encryptedData:ByteArray = EncryptedLocalStore.getItem(userId);
+				var data:UserData;
+				if (encryptedData != null) {
+					data = encryptedData.readObject() as UserData;
+				}
+				return data;
+			}
+			
+			private function searchHandler(result:Object):void {
+				if (result.success) {
+					// collect search results data from result
+					var searchResultData:Array = result.data as Array;
+					
+					//process searching through each of the results 
+					processSearchResults(searchResultData);
+				} else {
+					Alert.show("Sorry, there was an error performing the request.  Please try again later!");
+					clearBusy();
+				}
+			}
+			
+			private function setBusy(message:String):void {
+				lblBusy.text = message;
+				isBusy = true;
+			}
+			
+			private function setCurrentUser(user:Object):void {
+				currentUser = user;
+				lblName.text = user.name;
+				imgProfile.source = FacebookDesktop.getImageUrl(user.id, "small");
+				globalUser = retrieveData(user.id);
+				if (globalUser == null) {
+					globalUser = new UserData();
+				}
+				globalUser.data = user;
+				storeData(user.id, globalUser);
+				clearBusy();
+				FacebookDesktop.api(components.Helper.getFriends(), friendsHandler);
+				getPersonalInfo();
+			}
+			
+			private function storeData(userId:String, data:UserData):void {
+				var encryptedData:ByteArray = new ByteArray();
+				encryptedData.writeObject(data);
+				EncryptedLocalStore.setItem(userId, encryptedData);
+			}
+			
+			private function updatePrefetchStatus():void {
+				if (processedFriendsCount < totalFriendsCount) {
+					if (!bsPrefetchIndicator.visible) {
+						bsPrefetchIndicator.visible = true;
+					}
+					var completion:int = (processedFriendsCount * 100) / totalFriendsCount;
+					lblPrefetch.text = "Prefetching friends (" + completion + "%)";
+					lblPrefetch.visible = true;
+					btnPrefetchClear.visible = false;
+				} else {
+					if (bsPrefetchIndicator.visible) {
+						bsPrefetchIndicator.visible = false;
+					}
+					lblPrefetch.visible = false;
+					lblPrefetch.text = "";
+					btnPrefetchClear.visible = true;
+				}
+			}
+		]]></fx:Script>
+	<fx:Style>
+		@namespace components "components.*";
+		components|TerrificTabBar {
+			skinClass:ClassReference('skins.TerrificTabBarSkin');
+		}
+		components|TerrificTabBarButton {
+			skinClass:ClassReference('skins.TerrificTabBarButtonSkin');
+		}
+	</fx:Style>
+
+	<s:states>
+		<s:State name="LoggedIn"/>
+		<s:State name="LoggedOut"/>
+	</s:states>
+	<s:VGroup height="100%"
+			  width="100%"
+			  gap="0">
+		<components:TerrificTabBar id="tabBar"
+								   dataProvider="{vsContainer}"/>
+		<s:Line width="100%">
+			<s:stroke>
+				<s:SolidColorStroke color="0x000000"
+									weight="1"
+									caps="square"/>
+			</s:stroke>
+		</s:Line>
+		<mx:ViewStack id="vsContainer"
+					  width="100%"
+					  height="100%">
+			<s:NavigatorContent id="cHome"
+								label="Home"
+								width="100%"
+								height="100%">
+				<s:layout>
+					<s:VerticalLayout gap="0"/>
+				</s:layout>
+				<s:Group id="gHeader"
+						 width="100%"
+						 height="40">
+					<s:layout>
+						<s:BasicLayout/>
+					</s:layout>
+					<s:HGroup fontSize="24"
+							  gap="1"
+							  width="100%"
+							  height="40"
+							  left="10">
+						<s:VGroup width="40"
+								  includeIn="LoggedIn"
+								  height="40">
+							<s:Image id="imgProfile"
+									 includeIn="LoggedIn"
+									 width="100%"
+									 height="100%"
+									 smooth="true"
+									 smoothingQuality="high"
+									 verticalCenter="0"/>
+						</s:VGroup>
+						<s:Label id="lblName"
+								 height="100%"
+								 fontWeight="normal"
+								 verticalAlign="middle"
+								 paddingLeft.LoggedIn="10"
+								 text.LoggedIn=""
+								 text.LoggedOut="Please log in"/>
+						<s:Label includeIn="LoggedIn"
+								 paddingLeft="2"
+								 text="("
+								 height="100%"
+								 verticalAlign="middle"/>
+						<mx:LinkButton id="currentUserLink"
+									   includeIn="LoggedIn"
+									   label="Profile"
+									   click="currentUserLink_clickHandler(event)"
+									   color="#5B9AB6"
+									   paddingLeft="0"
+									   paddingRight="0"
+									   height="100%"/>
+						<s:Label includeIn="LoggedIn"
+								 text=")"
+								 height="100%"
+								 verticalAlign="middle"/>
+						<s:Group id="prefetchStatus"
+								 includeIn="LoggedIn"
+								 height="100%"
+								 fontSize="16"
+								 verticalCenter="0">
+							<s:layout>
+								<s:BasicLayout/>
+							</s:layout>
+							<mx:LinkButton id="btnPrefetchClear"
+										   visible="false"
+										   label="Reset friend data"
+										   click="btnPrefetchClear_clickHandler(event)"
+										   color="#5B9AB6"
+										   paddingLeft="2"
+										   verticalCenter="0"/>
+							<s:BusyIndicator id="bsPrefetchIndicator"
+											 symbolColor="#007BED"
+											 verticalCenter="0"
+											 x="7"
+											 visible="false"/>
+							<s:Label id="lblPrefetch"
+									 visible="false"
+									 height="100%"
+									 x="40"
+									 verticalAlign="middle"
+									 verticalCenter="0"/>
+						</s:Group>
+					</s:HGroup>
+					<s:Button id="btnLogInOut"
+							  label="Log Out"
+							  click="logout()"
+							  fontWeight="bold"
+							  skinClass.LoggedIn="skins.FBLogoutButtonSkin"
+							  right="10"
+							  label.LoggedOut="Log In"
+							  click.LoggedOut="login()"
+							  skinClass.LoggedOut="skins.FBLoginButtonSkin"
+							  verticalCenter="0"/>
+					<s:Line includeIn="LoggedIn"
+							bottom="0"
+							width="100%">
+						<s:stroke>
+							<s:SolidColorStroke color="0x000000"
+												weight="1"
+												caps="square"/>
+						</s:stroke>
+					</s:Line>
+				</s:Group>
+				<s:Group width="100%"
+						 height="100%"
+						 id="gMain">
+					<s:BorderContainer id="loadingGroup"
+									   x="0"
+									   y="0"
+									   width="100%"
+									   height="100%"
+									   backgroundAlpha="0.5"
+									   backgroundColor="#444444"
+									   depth="1"
+									   visible="{isBusy}"
+									   borderVisible="false">
+						<s:layout>
+							<s:BasicLayout/>
+						</s:layout>
+						<s:HGroup horizontalCenter="0"
+								  paddingBottom="5"
+								  paddingLeft="5"
+								  paddingRight="5"
+								  paddingTop="5"
+								  verticalAlign="middle"
+								  verticalCenter="0">
+							<s:BusyIndicator id="bsMainIndicator"
+											 visible="{isBusy}"
+											 symbolColor="#007BED"
+											 horizontalCenter="0"
+											 verticalCenter="0"/>
+							<s:Label id="lblBusy"
+									 height="100%"
+									 verticalAlign="middle"
+									 fontSize="24"/>
+						</s:HGroup>
+
+					</s:BorderContainer>
+					<s:Group x="0"
+							 y="0"
+							 width="100%"
+							 height="100%"
+							 id="displayContianer">
+						<s:layout>
+							<s:BasicLayout/>
+						</s:layout>
+						<s:BorderContainer id="SearchBoxOutest"
+										   includeIn="LoggedIn"
+										   height="40"
+										   borderWeight="2"
+										   cornerRadius="5"
+										   dropShadowVisible="true"
+										   horizontalCenter="0"
+										   verticalCenter="0">
+							<s:HGroup horizontalCenter="0"
+									  paddingBottom="5"
+									  paddingLeft="5"
+									  paddingRight="5"
+									  paddingTop="5"
+									  verticalAlign="middle"
+									  verticalCenter="0">
+								<s:TextInput id="txtSearch"
+											 width="200"/>
+								<s:Button id="btnSearch"
+										  label="Search"
+										  click="btnSearch_clickHandler(event)"/>
+							</s:HGroup>
+						</s:BorderContainer>
+						<mx:UIComponent id="resultContainer"
+										width="100"
+										height="100"
+										includeIn="LoggedIn"
+										depth="-1"/>
+					</s:Group>
+				</s:Group>
+			</s:NavigatorContent>
+		</mx:ViewStack>
+	</s:VGroup>
+</s:WindowedApplication>
