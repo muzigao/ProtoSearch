@@ -30,3 +30,10 @@ search results showing the connection between users and the result.</p>
 <p>On slower internet connections and processors, there are errors caused by timeout of data response and retrieval from the API.
 In such a situation, an error message is displayed by Adobe Air.  If you close the application and restart it, it will retrieve
 the missing information and work as desired.</p>
+
+<h2>More Information:</h2>
+<p>Refer to:</p>
+<ul>
+	<li>Prototypr_develop.pdf</li>
+	<li>Prototypr_user.pdf</li>
+</ul>
